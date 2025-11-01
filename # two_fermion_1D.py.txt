@@ -5,7 +5,10 @@
 # - Dibangun pada basis simetris spasial (singlet), diagonalize Hamiltonian, plot |Psi(x1,x2)|^2 dan densitas marginal
 
 import numpy as np
-from scipy import linalg
+streamlit
+numpy
+scipy
+matplotlib
 import matplotlib.pyplot as plt
 import os
 
@@ -127,3 +130,4 @@ with open(os.path.join(outdir, "summary.txt"), "w") as f:
 
 print("Gambar tersimpan di folder:", outdir)
 print("Ringkasan tersimpan:", os.path.join(outdir, "summary.txt"))
+
