@@ -1,133 +1,291 @@
-# two_fermion_1D.py
-# Visualisasi numerik fungsi gelombang dua fermion (spin-singlet) di sumur tak hingga 1D
-# - Basis: eigen fungsi sumur tak hingga phi_n(x) = sqrt(2/L) sin(n pi x / L)
-# - Interaksi kontak: V = g * delta(x1 - x2) (diperlakukan lewat integral produk basis)
-# - Dibangun pada basis simetris spasial (singlet), diagonalize Hamiltonian, plot |Psi(x1,x2)|^2 dan densitas marginal
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Visualisasi Dua Fermion 1D (Sumur Tak Hingga)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; margin: 16px; background:#fafafa; color:#111 }
+    h1 { font-size: 20px; margin-bottom: 6px }
+    .controls { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap }
+    label { font-size:13px }
+    input[type=range] { width:200px }
+    #plots { display:flex; gap:12px; flex-wrap:wrap }
+    #heatmap, #marginal { width:700px; max-width:100% }
+    .note { font-size:12px; color:#444; margin-top:8px }
+    footer { margin-top:14px; font-size:12px; color:#666 }
+    .small { font-size:13px }
+    button { padding:6px 10px; border-radius:6px; border:none; background:#0b6efd; color:white; cursor:pointer }
+    button:disabled { background:#9bb7ff; cursor:not-allowed }
+    .row { display:flex; gap:8px; align-items:center }
+  </style>
+  <!-- Dependencies: numeric.js (linear algebra) and Plotly for visualization -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+</head>
+<body>
+  <h1>Visualisasi Numerik — Dua Fermion di Sumur Satu Dimensi (1D)</h1>
+  <p class="small">Model: dua fermion spin-1/2 dalam <em>infinite square well</em> [0, L]. Bagian spasial diasumsikan <strong>simetris</strong> (spin-singlet) sehingga terkena interaksi kontak V = g δ(x₁−x₂). Basis: φ_n(x)=√(2/L) sin(nπx/L).</p>
 
-import numpy as np
-streamlit
-numpy
-scipy
-matplotlib
-import matplotlib.pyplot as plt
-import os
+  <div class="controls">
+    <div>
+      <label>L (panjang sumur): <span id="Lval">1.0</span></label><br>
+      <input id="L" type="range" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
 
-# -------------------------
-# Parameters (ubah jika perlu)
-L = 1.0         # panjang sumur
-Nmax = 8        # jumlah basis single-particle (n = 1..Nmax)
-g = 60.0        # kekuatan interaksi (g>0 = repulsif, g<0 = atraktif)
-nx = 120        # grid visualisasi per koordinat
-# -------------------------
+    <div>
+      <label>Nmax (jumlah basis): <span id="Nval">6</span></label><br>
+      <input id="Nmax" type="range" min="2" max="10" step="1" value="6">
+    </div>
 
-# Single-particle eigenfunctions dan energi (m = 1, hbar = 1 unit)
-def phi(n, x):
-    return np.sqrt(2.0 / L) * np.sin(n * np.pi * x / L)
+    <div>
+      <label>g (kekuatan interaksi): <span id="gval">60</span></label><br>
+      <input id="g" type="range" min="-200" max="300" step="5" value="60">
+    </div>
 
-def eps(n):
-    return (np.pi**2 * n**2) / (2.0 * L**2)
+    <div>
+      <label>Grid visual (nx): <span id="nxval">120</span></label><br>
+      <input id="nx" type="range" min="40" max="200" step="10" value="120">
+    </div>
 
-# Buat daftar pasangan (n <= m) untuk basis simetris spasial
-pairs = [(n, m) for n in range(1, Nmax+1) for m in range(n, Nmax+1)]
-B = len(pairs)
+    <div class="row" style="margin-left:8px">
+      <button id="runBtn">Run / Recompute</button>
+      <button id="downloadBtn">Download PNGs</button>
+    </div>
+  </div>
 
-# Precompute phi pada grid halus untuk integrasi numerik
-x_int = np.linspace(0, L, 1001)
-phi_grid = np.array([phi(n, x_int) for n in range(1, Nmax+1)])  # shape (Nmax, len(x_int))
+  <div id="status" class="note">Status: siap. Klik <strong>Run / Recompute</strong> untuk menghitung dan menggambar.</div>
 
-# Integral overlap I(n,m,p,q) = ∫ phi_n(x) phi_m(x) phi_p(x) phi_q(x) dx
-def overlap(n, m, p, q):
-    arr = phi_grid[n-1] * phi_grid[m-1] * phi_grid[p-1] * phi_grid[q-1]
-    return np.trapz(arr, x_int)
+  <div id="plots">
+    <div id="heatmap"></div>
+    <div id="marginal"></div>
+  </div>
 
-# Elemen matriks interaksi untuk basis simetris
-def interaction_matrix_element(pairA, pairB):
-    n, m = pairA
-    p, q = pairB
-    # simetris: kombinasi 1/2 * sum empat permutasi
-    I1 = overlap(n, m, p, q)
-    I2 = overlap(m, n, p, q)
-    I3 = overlap(n, m, q, p)
-    I4 = overlap(m, n, q, p)
-    return g * 0.5 * (I1 + I2 + I3 + I4)
+  <footer>
+    Catatan: perhitungan eigen dilakukan di browser memakai <code>numeric.js</code>. Untuk Nmax besar (&gt;10) atau grid besar, komputasi bisa lambat.
+  </footer>
 
-# Bangun Hamiltonian H = T + V pada basis simetris
-H = np.zeros((B, B))
-for i, (n, m) in enumerate(pairs):
-    H[i, i] = eps(n) + eps(m)  # energi non-interaksi
-    for j, (p, q) in enumerate(pairs):
-        H[i, j] += interaction_matrix_element((n, m), (p, q))
+<script>
+// Utility: trapezoidal integration on uniform grid
+function trapz(y, dx){
+  var s = 0;
+  var n = y.length;
+  for(var i=1;i<n-1;i++) s += y[i];
+  s += 0.5*(y[0]+y[n-1]);
+  return s*dx;
+}
 
-# Diagonalize
-Evals, Evecs = linalg.eigh(H)
-idx = np.argsort(Evals)
-Evals = Evals[idx]
-Evecs = Evecs[:, idx]
+function phi(n, x, L){
+  return Math.sqrt(2.0/L)*Math.sin(n*Math.PI*x/L);
+}
 
-print(f"Basis pairs (n<=m) count B = {B}")
-print("Beberapa eigenvalue terendah:")
-for k in range(min(8, len(Evals))):
-    print(f"{k}: E = {Evals[k]:.6f}")
+// Build symmetric two-particle basis pairs (n <= m)
+function makePairs(Nmax){
+  var pairs = [];
+  for(var n=1;n<=Nmax;n++){
+    for(var m=n;m<=Nmax;m++) pairs.push([n,m]);
+  }
+  return pairs;
+}
 
-# Rekonstruksi fungsi gelombang keadaan dasar di grid (x1, x2)
-x = np.linspace(0, L, nx)
-X1, X2 = np.meshgrid(x, x, indexing='xy')
+function buildHamiltonian(params){
+  var L = params.L, Nmax = params.Nmax, g = params.g;
+  var pairs = makePairs(Nmax);
+  var B = pairs.length;
 
-# Buat fungsi pasangan simetris pada grid
-pair_funcs = np.zeros((B, nx, nx))
-for idx_pair, (n, m) in enumerate(pairs):
-    phi_n_x1 = phi(n, x)[:, None]  # shape (nx,1)
-    phi_m_x2 = phi(m, x)[None, :]  # shape (1,nx)
-    if n == m:
-        psi_nm = phi_n_x1 @ phi_m_x2
-    else:
-        phi_m_x1 = phi(m, x)[:, None]
-        phi_n_x2 = phi(n, x)[None, :]
-        psi_nm = (phi_n_x1 @ phi_m_x2 + phi_m_x1 @ phi_n_x2) / np.sqrt(2.0)
-    pair_funcs[idx_pair] = psi_nm
+  // integration grid for overlap
+  var xintN = 1201;
+  var xint = new Array(xintN);
+  for(var i=0;i<xintN;i++) xint[i] = i*(L/(xintN-1));
+  var dx = xint[1]-xint[0];
 
-# Koefisien keadaan dasar
-c0 = Evecs[:, 0]  # kolom pertama = ground state
-Psi0 = np.tensordot(c0, pair_funcs, axes=(0, 0))  # shape (nx, nx)
-prob = np.abs(Psi0)**2
+  // precompute phi_grid
+  var phi_grid = new Array(Nmax+1);
+  for(var n=1;n<=Nmax;n++){
+    phi_grid[n] = new Array(xintN);
+    for(var i=0;i<xintN;i++) phi_grid[n][i] = phi(n, xint[i], L);
+  }
 
-# Normalisasi numerik
-norm = np.trapz(np.trapz(prob, x, axis=0), x, axis=0)
-Psi0 /= np.sqrt(norm)
-prob = np.abs(Psi0)**2
+  // overlap integral I(n,m,p,q)
+  function overlap(n,m,p,q){
+    var arr = new Array(xintN);
+    for(var i=0;i<xintN;i++) arr[i] = phi_grid[n][i]*phi_grid[m][i]*phi_grid[p][i]*phi_grid[q][i];
+    return trapz(arr, dx);
+  }
 
-# Output directory
-outdir = "two_fermion_plots"
-os.makedirs(outdir, exist_ok=True)
+  // Build H (dense)
+  var H = numeric.rep([B,B], 0);
+  for(var i=0;i<B;i++){
+    var n = pairs[i][0], m = pairs[i][1];
+    // kinetic
+    var En = (Math.PI*Math.PI*n*n)/(2*L*L);
+    var Em = (Math.PI*Math.PI*m*m)/(2*L*L);
+    H[i][i] = En + Em;
+  }
 
-# Plot 1: contour |Psi|^2
-plt.figure(figsize=(6,5))
-levels = 50
-cp = plt.contourf(X1, X2, prob, levels=levels)
-plt.xlabel("x1")
-plt.ylabel("x2")
-plt.title(f"Ground state |Ψ(x1,x2)|^2 (symmetric sector)  g={g}, Nmax={Nmax}")
-plt.colorbar(cp)
-out1 = os.path.join(outdir, "prob_density_contour.png")
-plt.savefig(out1, dpi=150, bbox_inches='tight')
-plt.show()
+  // interaction matrix elements
+  for(var i=0;i<B;i++){
+    for(var j=0;j<B;j++){
+      var n = pairs[i][0], m = pairs[i][1];
+      var p = pairs[j][0], q = pairs[j][1];
+      // symmetrized combination
+      var I1 = overlap(n,m,p,q);
+      var I2 = overlap(m,n,p,q);
+      var I3 = overlap(n,m,q,p);
+      var I4 = overlap(m,n,q,p);
+      H[i][j] += g*0.5*(I1+I2+I3+I4);
+    }
+  }
 
-# Plot 2: marginal density rho(x) = ∫ |Psi(x,x2)|^2 dx2
-rho_x = np.trapz(prob, x, axis=1)
-plt.figure(figsize=(6,3.5))
-plt.plot(x, rho_x)
-plt.xlabel("x")
-plt.ylabel(r"$\rho(x)$")
-plt.title("Single-particle marginal density  (ground state)")
-out2 = os.path.join(outdir, "marginal_density.png")
-plt.savefig(out2, dpi=150, bbox_inches='tight')
-plt.show()
+  return {H:H, pairs:pairs};
+}
 
-# Simpan ringkasan
-summary = f"Parameters: L={L}, Nmax={Nmax}, g={g}\nGround state energy E0={Evals[0]:.6f}\n"
-with open(os.path.join(outdir, "summary.txt"), "w") as f:
-    f.write(summary)
+function computeAndPlot(){
+  var L = parseFloat(document.getElementById('L').value);
+  var Nmax = parseInt(document.getElementById('Nmax').value);
+  var g = parseFloat(document.getElementById('g').value);
+  var nx = parseInt(document.getElementById('nx').value);
 
-print("Gambar tersimpan di folder:", outdir)
-print("Ringkasan tersimpan:", os.path.join(outdir, "summary.txt"))
+  document.getElementById('status').textContent = 'Status: membangun Hamiltonian... (ini bisa agak lama)';
+  // small delay to update UI
+  setTimeout(function(){
+    try{
+      var out = buildHamiltonian({L:L,Nmax:Nmax,g:g});
+    }catch(e){
+      document.getElementById('status').textContent = 'Error saat membangun H: '+e;
+      return;
+    }
 
+    document.getElementById('status').textContent = 'Status: diagonalize (menghitung eigenvalues/eigenvectors)...';
+
+    // numeric.js eig expects real symmetric => use numeric.eig
+    // Note: numeric.eig returns complex eigenvalues/vectors; we take real parts
+    var H = out.H;
+    var eigres = numeric.eig(H);
+    var evals = eigres.lambda.x; // real parts
+    var evecs = eigres.E.x; // columns are eigenvectors
+
+    // sort eigenvalues
+    var idx = evals.map(function(v,i){ return [v,i]; }).sort(function(a,b){ return a[0]-b[0]; }).map(function(t){ return t[1]; });
+    var Esorted = idx.map(function(i){ return evals[i]; });
+    var Vsorted = idx.map(function(i){ return numeric.getCol(evecs,i); });
+
+    document.getElementById('status').textContent = 'Status: membangun fungsi gelombang keadaan dasar...';
+
+    // build pair basis funcs on grid x
+    var x = new Array(nx);
+    for(var i=0;i<nx;i++) x[i] = i*(L/(nx-1));
+    var pairs = out.pairs;
+    var B = pairs.length;
+
+    // compute pair_funcs[b][i][j]
+    var pair_funcs = new Array(B);
+    for(var b=0;b<B;b++){
+      pair_funcs[b] = new Array(nx);
+      var n = pairs[b][0], m = pairs[b][1];
+      for(var i=0;i<nx;i++){
+        pair_funcs[b][i] = new Array(nx);
+        for(var j=0;j<nx;j++){
+          var val;
+          if(n===m){
+            val = phi(n,x[i],L)*phi(m,x[j],L);
+          } else {
+            val = (phi(n,x[i],L)*phi(m,x[j],L) + phi(m,x[i],L)*phi(n,x[j],L))/Math.sqrt(2);
+          }
+          pair_funcs[b][i][j] = val;
+        }
+      }
+    }
+
+    // ground state coefficients (first eigenvector)
+    var c0 = Vsorted[0]; // length B
+    // form Psi0 = sum_b c0[b]*pair_funcs[b]
+    var Psi0 = numeric.rep([nx,nx], 0);
+    for(var b=0;b<B;b++){
+      var c = c0[b];
+      for(var i=0;i<nx;i++){
+        for(var j=0;j<nx;j++){
+          Psi0[i][j] += c * pair_funcs[b][i][j];
+        }
+      }
+    }
+
+    // probability density
+    var prob = numeric.mul(Psi0, Psi0);
+
+    // normalize numerically
+    var dx = L/(nx-1);
+    var total = 0;
+    for(var i=0;i<nx;i++){
+      for(var j=0;j<nx;j++) total += prob[i][j];
+    }
+    total *= dx*dx;
+    var normFactor = Math.sqrt(total);
+    for(var i=0;i<nx;i++) for(var j=0;j<nx;j++) prob[i][j] /= (normFactor*normFactor);
+
+    // Prepare data for heatmap (Plotly expects Z as array of arrays row-major y->x)
+    var z = prob; // i -> x index, j -> y index; for plotting we keep x and y
+
+    var heatData = [{
+      z: z,
+      x: x,
+      y: x,
+      type: 'heatmap',
+      colorscale: 'Viridis'
+    }];
+
+    var heatLayout = {
+      title: 'Probabilitas |Ψ(x1,x2)|^2 (keadaan dasar) — g=' + g + '  Nmax=' + Nmax,
+      xaxis: {title: 'x1'},
+      yaxis: {title: 'x2'}
+    };
+
+    Plotly.newPlot('heatmap', heatData, heatLayout, {responsive:true});
+
+    // marginal density rho(x) = ∫ prob dx2
+    var rho = new Array(nx).fill(0);
+    for(var i=0;i<nx;i++){
+      var s = 0;
+      for(var j=0;j<nx;j++) s += prob[i][j];
+      rho[i] = s * dx; // integrate over x2
+    }
+
+    var margData = [{ x: x, y: rho, mode:'lines', name:'rho(x)' }];
+    var margLayout = { title: 'Densitas marginal ρ(x) = ∫ |Ψ(x,x2)|^2 dx2', xaxis:{title:'x'}, yaxis:{title:'ρ(x)'} };
+    Plotly.newPlot('marginal', margData, margLayout, {responsive:true});
+
+    // update status & eigen energies
+    var info = 'Energies (lowest few): ' + Esorted.slice(0,6).map(function(v,i){ return (i+0)+':'+v.toFixed(4);}).join(', ');
+    document.getElementById('status').textContent = 'Selesai. ' + info;
+
+  }, 50);
+}
+
+// Wire up controls
+['L','Nmax','g','nx'].forEach(function(id){
+  document.getElementById(id).addEventListener('input', function(e){
+    var val = e.target.value;
+    if(id==='L') document.getElementById('Lval').textContent = val;
+    if(id==='Nmax') document.getElementById('Nval').textContent = val;
+    if(id==='g') document.getElementById('gval').textContent = val;
+    if(id==='nx') document.getElementById('nxval').textContent = val;
+  });
+});
+
+document.getElementById('runBtn').addEventListener('click', computeAndPlot);
+
+// download button: save both plots as PNG using Plotly
+document.getElementById('downloadBtn').addEventListener('click', function(){
+  Plotly.toImage('heatmap', {format:'png', width:800, height:600}).then(function(imgData){
+    var a = document.createElement('a'); a.href = imgData; a.download = 'psi2_heatmap.png'; a.click();
+    Plotly.toImage('marginal', {format:'png', width:800, height:300}).then(function(img2){
+      var b = document.createElement('a'); b.href = img2; b.download = 'rho_marginal.png'; b.click();
+    });
+  });
+});
+
+// initial run
+computeAndPlot();
+</script>
+</body>
+</html>
