@@ -78,5 +78,42 @@ if st.button("🔁 Jalankan Simulasi"):
         else:
             phi_m_x1 = phi(m, x)[:, None]
             phi_n_x2 = phi(n, x)[None, :]
-            psi_nm = (ph_
+            psi_nm = (phi_n_x1 @ phi_m_x2 + phi_m_x1 @ phi_n_x2) / np.sqrt(2.0)
+        pair_funcs[idx_pair] = psi_nm
 
+    c0 = Evecs[:, 0]
+    Psi0 = np.tensordot(c0, pair_funcs, axes=(0, 0))
+    prob = np.abs(Psi0)**2
+    norm = np.trapz(np.trapz(prob, x, axis=0), x, axis=0)
+    Psi0 /= np.sqrt(norm)
+    prob = np.abs(Psi0)**2
+
+    # Plot 1: kontur |Ψ|²
+    fig1, ax1 = plt.subplots(figsize=(6, 5))
+    cp = ax1.contourf(X1, X2, prob, levels=50)
+    ax1.set_xlabel("x₁")
+    ax1.set_ylabel("x₂")
+    ax1.set_title(f"|Ψ(x₁,x₂)|², g={g}")
+    fig1.colorbar(cp)
+    st.pyplot(fig1)
+
+    # Plot 2: densitas marginal ρ(x)
+    rho_x = np.trapz(prob, x, axis=1)
+    fig2, ax2 = plt.subplots(figsize=(6, 3.5))
+    ax2.plot(x, rho_x)
+    ax2.set_xlabel("x")
+    ax2.set_ylabel("ρ(x)")
+    ax2.set_title("Densitas partikel tunggal (ground state)")
+    st.pyplot(fig2)
+
+    # Ringkasan
+    st.markdown(f"""
+    **Parameter simulasi:**
+    - Panjang sumur (L) = {L}
+    - Jumlah basis (Nmax) = {Nmax}
+    - Kekuatan interaksi (g) = {g}
+    - Grid resolusi (nx) = {nx}
+    - Energi keadaan dasar = {Evals[0]:.6f}
+    """)
+else:
+    st.info("Klik tombol **Jalankan Simulasi** untuk memulai perhitungan.")
