@@ -1,0 +1,129 @@
+# two_fermion_1D.py
+# Visualisasi numerik fungsi gelombang dua fermion (spin-singlet) di sumur tak hingga 1D
+# - Basis: eigen fungsi sumur tak hingga phi_n(x) = sqrt(2/L) sin(n pi x / L)
+# - Interaksi kontak: V = g * delta(x1 - x2) (diperlakukan lewat integral produk basis)
+# - Dibangun pada basis simetris spasial (singlet), diagonalize Hamiltonian, plot |Psi(x1,x2)|^2 dan densitas marginal
+
+import numpy as np
+from scipy import linalg
+import matplotlib.pyplot as plt
+import os
+
+# -------------------------
+# Parameters (ubah jika perlu)
+L = 1.0         # panjang sumur
+Nmax = 8        # jumlah basis single-particle (n = 1..Nmax)
+g = 60.0        # kekuatan interaksi (g>0 = repulsif, g<0 = atraktif)
+nx = 120        # grid visualisasi per koordinat
+# -------------------------
+
+# Single-particle eigenfunctions dan energi (m = 1, hbar = 1 unit)
+def phi(n, x):
+    return np.sqrt(2.0 / L) * np.sin(n * np.pi * x / L)
+
+def eps(n):
+    return (np.pi**2 * n**2) / (2.0 * L**2)
+
+# Buat daftar pasangan (n <= m) untuk basis simetris spasial
+pairs = [(n, m) for n in range(1, Nmax+1) for m in range(n, Nmax+1)]
+B = len(pairs)
+
+# Precompute phi pada grid halus untuk integrasi numerik
+x_int = np.linspace(0, L, 1001)
+phi_grid = np.array([phi(n, x_int) for n in range(1, Nmax+1)])  # shape (Nmax, len(x_int))
+
+# Integral overlap I(n,m,p,q) = ∫ phi_n(x) phi_m(x) phi_p(x) phi_q(x) dx
+def overlap(n, m, p, q):
+    arr = phi_grid[n-1] * phi_grid[m-1] * phi_grid[p-1] * phi_grid[q-1]
+    return np.trapz(arr, x_int)
+
+# Elemen matriks interaksi untuk basis simetris
+def interaction_matrix_element(pairA, pairB):
+    n, m = pairA
+    p, q = pairB
+    # simetris: kombinasi 1/2 * sum empat permutasi
+    I1 = overlap(n, m, p, q)
+    I2 = overlap(m, n, p, q)
+    I3 = overlap(n, m, q, p)
+    I4 = overlap(m, n, q, p)
+    return g * 0.5 * (I1 + I2 + I3 + I4)
+
+# Bangun Hamiltonian H = T + V pada basis simetris
+H = np.zeros((B, B))
+for i, (n, m) in enumerate(pairs):
+    H[i, i] = eps(n) + eps(m)  # energi non-interaksi
+    for j, (p, q) in enumerate(pairs):
+        H[i, j] += interaction_matrix_element((n, m), (p, q))
+
+# Diagonalize
+Evals, Evecs = linalg.eigh(H)
+idx = np.argsort(Evals)
+Evals = Evals[idx]
+Evecs = Evecs[:, idx]
+
+print(f"Basis pairs (n<=m) count B = {B}")
+print("Beberapa eigenvalue terendah:")
+for k in range(min(8, len(Evals))):
+    print(f"{k}: E = {Evals[k]:.6f}")
+
+# Rekonstruksi fungsi gelombang keadaan dasar di grid (x1, x2)
+x = np.linspace(0, L, nx)
+X1, X2 = np.meshgrid(x, x, indexing='xy')
+
+# Buat fungsi pasangan simetris pada grid
+pair_funcs = np.zeros((B, nx, nx))
+for idx_pair, (n, m) in enumerate(pairs):
+    phi_n_x1 = phi(n, x)[:, None]  # shape (nx,1)
+    phi_m_x2 = phi(m, x)[None, :]  # shape (1,nx)
+    if n == m:
+        psi_nm = phi_n_x1 @ phi_m_x2
+    else:
+        phi_m_x1 = phi(m, x)[:, None]
+        phi_n_x2 = phi(n, x)[None, :]
+        psi_nm = (phi_n_x1 @ phi_m_x2 + phi_m_x1 @ phi_n_x2) / np.sqrt(2.0)
+    pair_funcs[idx_pair] = psi_nm
+
+# Koefisien keadaan dasar
+c0 = Evecs[:, 0]  # kolom pertama = ground state
+Psi0 = np.tensordot(c0, pair_funcs, axes=(0, 0))  # shape (nx, nx)
+prob = np.abs(Psi0)**2
+
+# Normalisasi numerik
+norm = np.trapz(np.trapz(prob, x, axis=0), x, axis=0)
+Psi0 /= np.sqrt(norm)
+prob = np.abs(Psi0)**2
+
+# Output directory
+outdir = "two_fermion_plots"
+os.makedirs(outdir, exist_ok=True)
+
+# Plot 1: contour |Psi|^2
+plt.figure(figsize=(6,5))
+levels = 50
+cp = plt.contourf(X1, X2, prob, levels=levels)
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title(f"Ground state |Ψ(x1,x2)|^2 (symmetric sector)  g={g}, Nmax={Nmax}")
+plt.colorbar(cp)
+out1 = os.path.join(outdir, "prob_density_contour.png")
+plt.savefig(out1, dpi=150, bbox_inches='tight')
+plt.show()
+
+# Plot 2: marginal density rho(x) = ∫ |Psi(x,x2)|^2 dx2
+rho_x = np.trapz(prob, x, axis=1)
+plt.figure(figsize=(6,3.5))
+plt.plot(x, rho_x)
+plt.xlabel("x")
+plt.ylabel(r"$\rho(x)$")
+plt.title("Single-particle marginal density  (ground state)")
+out2 = os.path.join(outdir, "marginal_density.png")
+plt.savefig(out2, dpi=150, bbox_inches='tight')
+plt.show()
+
+# Simpan ringkasan
+summary = f"Parameters: L={L}, Nmax={Nmax}, g={g}\nGround state energy E0={Evals[0]:.6f}\n"
+with open(os.path.join(outdir, "summary.txt"), "w") as f:
+    f.write(summary)
+
+print("Gambar tersimpan di folder:", outdir)
+print("Ringkasan tersimpan:", os.path.join(outdir, "summary.txt"))
